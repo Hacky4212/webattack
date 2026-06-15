@@ -1,6 +1,9 @@
 package brute
 
 import (
+	"crypto/md5"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"strings"
@@ -262,8 +265,9 @@ func (b *BruteForcer) tryFormLogin(cred Credential) (*httpclient.Response, error
 
 // tryBasicAuth attempts HTTP Basic authentication
 func (b *BruteForcer) tryBasicAuth(cred Credential) (*httpclient.Response, error) {
+	auth := base64.StdEncoding.EncodeToString([]byte(cred.Username + ":" + cred.Password))
 	req := b.client.NewRequest("GET", b.targetURL)
-	req.SetHeader("Authorization", fmt.Sprintf("Basic %s:%s", cred.Username, cred.Password))
+	req.SetHeader("Authorization", "Basic "+auth)
 	return req.Do()
 }
 
@@ -284,12 +288,83 @@ func (b *BruteForcer) tryDigestAuth(cred Credential) (*httpclient.Response, erro
 		return resp, nil
 	}
 
-	// This is a simplified digest implementation
-	// For production use, implement full RFC 2617 digest
+	// Parse digest parameters
+	digestParams := parseDigestHeader(authHeader)
+	realm := digestParams["realm"]
+	nonce := digestParams["nonce"]
+	qop := digestParams["qop"]
+	opaque := digestParams["opaque"]
+	algorithm := digestParams["algorithm"]
+
+	if algorithm == "" {
+		algorithm = "MD5"
+	}
+
+	// Compute HA1 = MD5(username:realm:password)
+	ha1 := md5Hex(cred.Username + ":" + realm + ":" + cred.Password)
+
+	// Compute HA2 = MD5(method:uri)
+	parsedURL, _ := url.Parse(b.targetURL)
+	uri := parsedURL.Path
+	if parsedURL.RawQuery != "" {
+		uri += "?" + parsedURL.RawQuery
+	}
+	ha2 := md5Hex("GET:" + uri)
+
+	// Compute response
+	var response string
+	cnonce := "0a4f113b"
+	nc := "00000001"
+
+	if qop == "auth" || strings.Contains(qop, "auth") {
+		response = md5Hex(ha1 + ":" + nonce + ":" + nc + ":" + cnonce + ":auth:" + ha2)
+	} else {
+		response = md5Hex(ha1 + ":" + nonce + ":" + ha2)
+	}
+
+	// Build Authorization header
+	authValue := fmt.Sprintf(
+		`Digest username="%s", realm="%s", nonce="%s", uri="%s", response="%s"`,
+		cred.Username, realm, nonce, uri, response,
+	)
+	if qop != "" {
+		authValue += fmt.Sprintf(`, qop=auth, nc=%s, cnonce="%s"`, nc, cnonce)
+	}
+	if opaque != "" {
+		authValue += fmt.Sprintf(`, opaque="%s"`, opaque)
+	}
+	if algorithm != "MD5" {
+		authValue += fmt.Sprintf(`, algorithm=%s`, algorithm)
+	}
+
 	req := b.client.NewRequest("GET", b.targetURL)
-	req.SetHeader("Authorization", fmt.Sprintf("Digest username=\"%s\", password=\"%s\"",
-		cred.Username, cred.Password))
+	req.SetHeader("Authorization", authValue)
 	return req.Do()
+}
+
+// parseDigestHeader parses Digest WWW-Authenticate header parameters
+func parseDigestHeader(header string) map[string]string {
+	params := make(map[string]string)
+	// Remove "Digest " prefix
+	header = strings.TrimPrefix(header, "Digest ")
+	// Split by comma, but be careful with quoted values
+	parts := strings.Split(header, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) == 2 {
+			key := strings.TrimSpace(kv[0])
+			val := strings.Trim(kv[1], `"`)
+			params[key] = val
+		}
+	}
+	return params
+}
+
+// md5Hex returns MD5 hash as hex string
+func md5Hex(s string) string {
+	h := md5.Sum([]byte(s))
+	return hex.EncodeToString(h[:])
 }
 
 func (b *BruteForcer) addResult(cred Credential, elapsed time.Duration, respLen int, body string) {
