@@ -1,0 +1,52 @@
+# ===== 编译产物 =====
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# ===== IDE & 编辑器 =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ===== Go =====
+vendor/
+*.mod.backup
+*.sum.backup
+
+# ===== 临时文件 & 日志 =====
+*.log
+*.tmp
+*.temp
+build_error.txt
+test_shell.php
+
+# ===== 测试覆盖率 =====
+*.coverprofile
+coverage.out
+coverage.html
+
+# ===== 环境变量 & 密钥 =====
+.env
+.env.*
+*.key
+*.pem
+secrets/
+
+# ===== 打包文件 =====
+*.zip
+*.tar.gz
+*.7z
+*.rar
+
+# ===== 操作系统 =====
+Desktop.ini
+$RECYCLE.BIN/
