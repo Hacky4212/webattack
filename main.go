@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"webattack/pkg/brute"
 	"webattack/pkg/csrfssrf"
@@ -11,6 +12,7 @@ import (
 	"webattack/pkg/scanner"
 	"webattack/pkg/shell"
 	"webattack/pkg/sqli"
+	"webattack/pkg/stress"
 	"webattack/pkg/xss"
 
 	"github.com/fatih/color"
@@ -47,6 +49,15 @@ var (
 	shellRemote string
 	genShell    bool
 	genOutput   string
+
+	// Stress test flags
+	stressMethod      string
+	stressBody        string
+	stressHeaders     []string
+	stressContentType string
+	stressDuration    string
+	stressRequests    int64
+	stressRate        float64
 )
 
 func main() {
@@ -211,6 +222,22 @@ Always obtain proper authorization before testing any system.`,
 	shellCmd.AddCommand(shellInteractiveCmd)
 
 	rootCmd.AddCommand(shellCmd)
+
+	// Stress test command
+	stressCmd := &cobra.Command{
+		Use:   "stress",
+		Short: "Stress Test / Load Testing Tool",
+		Long:  `Perform stress testing against web applications to evaluate performance and capacity.`,
+		Run:   runStress,
+	}
+	stressCmd.Flags().StringVarP(&stressMethod, "method", "X", "GET", "HTTP method: GET, POST, PUT, DELETE, HEAD, OPTIONS, PATCH")
+	stressCmd.Flags().StringVarP(&stressBody, "body", "d", "", "Request body (for POST/PUT/PATCH)")
+	stressCmd.Flags().StringArrayVarP(&stressHeaders, "header", "H", nil, "Custom header (e.g., 'Authorization: Bearer token')")
+	stressCmd.Flags().StringVar(&stressContentType, "content-type", "", "Content-Type header")
+	stressCmd.Flags().StringVarP(&stressDuration, "duration", "D", "10s", "Test duration (e.g., 10s, 1m, 5m)")
+	stressCmd.Flags().Int64VarP(&stressRequests, "requests", "n", 0, "Total number of requests to send (overrides duration)")
+	stressCmd.Flags().Float64VarP(&stressRate, "rate", "r", 0, "Requests per second rate limit (0 = unlimited)")
+	rootCmd.AddCommand(stressCmd)
 
 	// Execute
 	if err := rootCmd.Execute(); err != nil {
@@ -553,5 +580,71 @@ func runShellInteract(cmd *cobra.Command, args []string) {
 	if err := shell.InteractiveShell(mgr, shellIndex); err != nil {
 		color.Red("Error: %v", err)
 		os.Exit(1)
+	}
+}
+
+func runStress(cmd *cobra.Command, args []string) {
+	printBanner()
+
+	if targetURL == "" {
+		color.Red("Error: --url/-u is required")
+		os.Exit(1)
+	}
+
+	// Parse duration - bare numbers are treated as seconds
+	if stressDuration != "" {
+		if _, err := time.ParseDuration(stressDuration); err != nil {
+			// Try appending "s" for bare numbers like "120" -> "120s"
+			stressDuration = stressDuration + "s"
+		}
+	}
+	duration, err := time.ParseDuration(stressDuration)
+	if err != nil {
+		color.Red("Invalid duration format: %s (use e.g., 10s, 1m, 5m, or 120)", stressDuration)
+		os.Exit(1)
+	}
+
+	// If --requests is set, ignore duration by setting to 0
+	if stressRequests > 0 {
+		duration = 0
+	}
+
+	// Parse custom headers
+	headers := make(map[string]string)
+	for _, h := range stressHeaders {
+		parts := strings.SplitN(h, ":", 2)
+		if len(parts) == 2 {
+			headers[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		}
+	}
+
+	client := createClient()
+
+	cfg := stress.DefaultConfig()
+	cfg.URL = targetURL
+	cfg.Method = strings.ToUpper(stressMethod)
+	cfg.Body = stressBody
+	cfg.Headers = headers
+	cfg.ContentType = stressContentType
+	cfg.Workers = threads
+	cfg.Duration = duration
+	cfg.MaxRequests = stressRequests
+	cfg.RateLimit = stressRate
+	cfg.Verbose = verbose
+	cfg.OutputFile = outputFile
+
+	tester := stress.NewTester(client, cfg)
+	stats, err := tester.Run()
+	if err != nil {
+		color.Red("Stress test error: %v", err)
+		os.Exit(1)
+	}
+
+	stats.PrintReport()
+
+	if outputFile != "" {
+		report := stats.GenerateReport(targetURL)
+		os.WriteFile(outputFile, []byte(report), 0644)
+		color.Green("\n[+] Report saved to: %s", outputFile)
 	}
 }

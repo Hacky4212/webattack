@@ -10,6 +10,7 @@ bin/
 
 # ===== IDE & 编辑器 =====
 .vscode/
+.vs/
 .idea/
 *.swp
 *.swo
@@ -28,6 +29,11 @@ vendor/
 *.temp
 build_error.txt
 test_shell.php
+
+# ===== 工具输出文件 =====
+report.txt
+res.txt
+*.report
 
 # ===== 测试覆盖率 =====
 *.coverprofile
@@ -50,3 +56,4 @@ secrets/
 # ===== 操作系统 =====
 Desktop.ini
 $RECYCLE.BIN/
+webattack.exe

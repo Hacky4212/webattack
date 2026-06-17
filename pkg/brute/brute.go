@@ -1,6 +1,7 @@
 package brute
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/base64"
 	"encoding/hex"
@@ -142,7 +143,7 @@ func (b *BruteForcer) Attack(usernames, passwords []string) ([]Result, error) {
 		go func() {
 			defer wg.Done()
 			for cred := range creds {
-				b.rateLimiter.Wait(nil)
+				b.rateLimiter.Wait(context.Background())
 				b.tryLogin(cred)
 			}
 		}()
