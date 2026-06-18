@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"sort"
 	"strings"
@@ -25,6 +26,8 @@ type Config struct {
 	Headers     map[string]string
 	ContentType string
 	Workers     int
+	Users       int           // concurrent virtual users (0 = use Workers/RPS mode)
+	ThinkTime   time.Duration // think time between user requests
 	Duration    time.Duration // 0 = run until MaxRequests reached
 	MaxRequests int64         // 0 = run until Duration elapsed
 	RateLimit   float64       // requests per second, 0 = no limit
@@ -38,6 +41,8 @@ func DefaultConfig() *Config {
 	return &Config{
 		Method:      "GET",
 		Workers:     10,
+		Users:       0,
+		ThinkTime:   3 * time.Second,
 		Duration:    10 * time.Second,
 		MaxRequests: 0,
 		RateLimit:   0,
@@ -114,10 +119,22 @@ func (t *Tester) Run() (*Stats, error) {
 	t.stats.startTime = time.Now()
 
 	// Print header
+	workerCount := t.config.Workers
+	modeLabel := "RPS"
+	if t.config.Users > 0 {
+		workerCount = t.config.Users
+		modeLabel = "Users"
+	}
+
 	fmt.Printf("\n[*] Starting stress test...\n")
 	fmt.Printf("[*] Target:     %s\n", t.config.URL)
 	fmt.Printf("[*] Method:     %s\n", t.config.Method)
-	fmt.Printf("[*] Workers:    %d\n", t.config.Workers)
+	fmt.Printf("[*] Mode:       %s\n", modeLabel)
+	if t.config.Users > 0 {
+		fmt.Printf("[*] Users:      %d (think time: %v)\n", t.config.Users, t.config.ThinkTime)
+	} else {
+		fmt.Printf("[*] Workers:    %d\n", t.config.Workers)
+	}
 	if t.config.Duration > 0 {
 		fmt.Printf("[*] Duration:   %v\n", t.config.Duration)
 	}
@@ -165,11 +182,15 @@ func (t *Tester) Run() (*Stats, error) {
 
 	// Worker pool
 	var wg sync.WaitGroup
-	for i := 0; i < t.config.Workers; i++ {
+	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			t.worker()
+			if t.config.Users > 0 {
+				t.userWorker()
+			} else {
+				t.worker()
+			}
 		}()
 	}
 
@@ -204,6 +225,41 @@ func (t *Tester) worker() {
 		}
 
 		t.sendRequest()
+	}
+}
+
+// userWorker simulates a single virtual user with think time between requests
+func (t *Tester) userWorker() {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "\n[!] User worker panic recovered: %v\n", r)
+		}
+	}()
+
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	thinkTime := float64(t.config.ThinkTime)
+
+	for {
+		select {
+		case <-t.ctx.Done():
+			return
+		default:
+		}
+
+		// Check max requests
+		if t.config.MaxRequests > 0 && atomic.LoadInt64(&t.stats.TotalRequests) >= t.config.MaxRequests {
+			return
+		}
+
+		t.sendRequest()
+
+		// Random think time: 50% ~ 150% of configured think time
+		jitter := thinkTime * (0.5 + rng.Float64())
+		select {
+		case <-time.After(time.Duration(jitter)):
+		case <-t.ctx.Done():
+			return
+		}
 	}
 }
 

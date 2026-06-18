@@ -58,6 +58,8 @@ var (
 	stressDuration    string
 	stressRequests    int64
 	stressRate        float64
+	stressUsers       int
+	stressThinkTime   string
 )
 
 func main() {
@@ -237,6 +239,8 @@ Always obtain proper authorization before testing any system.`,
 	stressCmd.Flags().StringVarP(&stressDuration, "duration", "D", "10s", "Test duration (e.g., 10s, 1m, 5m)")
 	stressCmd.Flags().Int64VarP(&stressRequests, "requests", "n", 0, "Total number of requests to send (overrides duration)")
 	stressCmd.Flags().Float64VarP(&stressRate, "rate", "r", 0, "Requests per second rate limit (0 = unlimited)")
+	stressCmd.Flags().IntVarP(&stressUsers, "users", "c", 0, "Number of concurrent virtual users (simulates real users with think time)")
+	stressCmd.Flags().StringVar(&stressThinkTime, "think-time", "3s", "Think time between user requests (e.g., 1s, 500ms)")
 	rootCmd.AddCommand(stressCmd)
 
 	// Execute
@@ -609,6 +613,13 @@ func runStress(cmd *cobra.Command, args []string) {
 		duration = 0
 	}
 
+	// Parse think time
+	thinkTime, err := time.ParseDuration(stressThinkTime)
+	if err != nil {
+		color.Red("Invalid think-time format: %s (use e.g., 1s, 500ms)", stressThinkTime)
+		os.Exit(1)
+	}
+
 	// Parse custom headers
 	headers := make(map[string]string)
 	for _, h := range stressHeaders {
@@ -627,6 +638,8 @@ func runStress(cmd *cobra.Command, args []string) {
 	cfg.Headers = headers
 	cfg.ContentType = stressContentType
 	cfg.Workers = threads
+	cfg.Users = stressUsers
+	cfg.ThinkTime = thinkTime
 	cfg.Duration = duration
 	cfg.MaxRequests = stressRequests
 	cfg.RateLimit = stressRate

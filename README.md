@@ -15,6 +15,7 @@
 | Web漏洞扫描器 | `scan` | 综合扫描：目录发现、安全头、Cookie、CORS、信息泄露等 |
 | 暴力破解 | `brute` | 表单/HTTP Basic/Digest 认证暴力破解 |
 | CSRF/SSRF | `csrf-ssrf` | CSRF保护缺失检测 + SSRF漏洞测试 |
+| 压力测试 | `stress` | HTTP压力测试/负载测试，支持多方法、限速、自定义头、实时统计 |
 | WebShell管理 | `shell` | Shell管理、命令执行、文件上传下载、交互式会话 |
 
 ## 构建与打包
@@ -281,6 +282,41 @@ sudo chmod +x /usr/local/bin/webattack
 ./webattack csrf-ssrf -u "http://target.com/profile.php"
 ```
 
+### 压力测试
+
+支持两种模式：**RPS 模式**（固定吞吐量）和 **用户模式**（模拟真实用户在线）。
+
+```bash
+# === RPS 模式：50并发持续60秒 ===
+./webattack stress -u "https://target.com/" -t 50 -D 60s
+
+# === 用户模式：100个虚拟用户在线，每次请求间隔1-3秒 ===
+./webattack stress -u "https://target.com/" -c 100 --think-time 2s -D 120s
+
+# POST JSON 压测，限制500 req/s，发10000个请求
+./webattack stress -u "https://target.com/api/login" \
+  -X POST -H "Authorization: Bearer xxx" \
+  --content-type "application/json" \
+  -d '{"user":"test"}' -r 500 -n 10000
+
+# 用户模式 + 详细日志 + 报告输出
+./webattack stress -u "https://target.com/" -c 200 --think-time 1s -D 5m -v -o report.txt
+```
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `-X, --method` | HTTP 方法 | `GET` |
+| `-d, --body` | 请求体 | - |
+| `-H, --header` | 自定义请求头，可重复使用 | - |
+| `--content-type` | Content-Type 头 | - |
+| `-D, --duration` | 测试持续时间（纯数字按秒） | `10s` |
+| `-n, --requests` | 总请求数（设此项则忽略 duration） | `0` |
+| `-r, --rate` | 速率限制 req/s（0=不限） | `0` |
+| `-c, --users` | 并发虚拟用户数（启用用户模式，覆盖 `-t`） | `0` |
+| `--think-time` | 用户请求间隔（如 `2s`、`500ms`，实际会加随机抖动） | `3s` |
+
+> **模式区别**：`-t`（RPS 模式）尽可能快发请求；`-c`（用户模式）模拟真实用户，每次请求后随机等待 `50%~150%` 的思考时间再发下一个。
+
 ### WebShell管理
 ```bash
 # 生成Shell
@@ -347,6 +383,8 @@ webattack/
 │   │   └── brute.go
 │   ├── csrfssrf/           # CSRF/SSRF扫描器
 │   │   └── csrf_ssrf.go
+│   ├── stress/             # 压力测试引擎 (多方法/限速/实时统计)
+│   │   └── stress.go
 │   └── shell/              # WebShell管理器 (交互/上传/下载/生成)
 │       └── shell.go
 └── payloads/               # 字典文件
@@ -362,4 +400,5 @@ webattack/
 - **WAF检测**: 自动识别常见WAF产品
 - **上下文感知**: XSS扫描器能识别不同的注入上下文
 - **多种认证**: 支持表单、Basic、Digest认证爆破
+- **压力测试**: HTTP负载测试，支持多方法、速率限制、实时统计和百分位延迟分析
 - **报告生成**: 自动生成详细的测试报告
